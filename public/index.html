@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><title>Kami CAD</title><style>body { margin: 0; font-family: system-ui; background: #101522; color: #edf2ff; }
+header { padding: 16px; background: #202c49; }
+main { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 52px); }
+aside { padding: 18px; background: #161e33; }
+.canvas { margin: 22px; border: 1px solid #5972ad; background: repeating-linear-gradient(0deg,transparent,transparent 24px,#263657 25px),repeating-linear-gradient(90deg,transparent,transparent 24px,#263657 25px); }
+svg { width: 100%; height: 100%; }
+button { display: block; width: 100%; margin: 8px 0; padding: 10px; background: #2d4275; color: #fff; border: 1px solid #7898e5; border-radius: 6px; }</style></head>
+  <body>
+    <header>
+      <strong>KAMI CAD · NURBS WORKSPACE</strong>
+    </header>
+    <main>
+      <aside>
+        <h3>Curve tools</h3>
+        <button>Control point</button>
+        <button>Loft</button>
+        <button>Sweep</button>
+        <h3>Precision</h3>
+        <button>Snap · 1 mm</button>
+        <button>Dimensions</button>
+      </aside>
+      <section class="canvas">
+        <svg viewBox="0 0 800 560">
+          <path d="M 80 420 C 180 70, 550 80, 720 360" fill="none" stroke="#9bb9ff" stroke-width="5"></path>
+          <circle cx="80" cy="420" r="8" fill="#ffd18f"></circle>
+          <circle cx="720" cy="360" r="8" fill="#ffd18f"></circle>
+        </svg>
+      </section>
+    </main>
+  </body>
+</html>
