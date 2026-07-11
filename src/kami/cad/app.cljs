@@ -4,7 +4,14 @@
                       :history [] :future [] :azimuth 0.7 :elevation 0.45}))
 (defonce viewport (atom nil))
 (defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
-(defn- upload! [] (when-let [v @viewport] (let [m (mesh)] (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m)) (set! (.-textContent (.getElementById js/document "stats")) (str "2 sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles")))))
+(defn- upload! []
+  (when-let [v @viewport]
+    (let [m (mesh)]
+      (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m))
+      (set! (.-textContent (.getElementById js/document "stats")) (str "2 sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
+      (set! (.-textContent (.getElementById js/document "debug-state"))
+            (js/JSON.stringify (clj->js {:segments (:segments @state)
+                                         :controlPoints (mapv :cad/control-points (:sections @state))}))))))
 (defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :future [])))) (upload!))
 (defn- draw! [] (when-let [{:keys [buffers] :as v} @viewport] (when buffers (let [{:keys [azimuth elevation]} @state d 8 eye [(* d (js/Math.cos elevation) (js/Math.cos azimuth)) (* d (js/Math.sin elevation)) (* d (js/Math.cos elevation) (js/Math.sin azimuth))]] (gpu/render-frame! v buffers eye [0 1 1] [0.45 0.7 1.0])))) (js/requestAnimationFrame draw!))
 (defn- num [id] (js/parseFloat (.-value (.getElementById js/document id))))
