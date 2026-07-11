@@ -1,10 +1,13 @@
 (ns kami.cad.app (:require [cljs.reader :as reader] [clojure.string :as string]
                            [kami.cad :as cad] [kami.cad.project :as project] [kami.webgpu.mesh :as gpu]))
 (defn sections [] [(cad/curve [[-2 0 0] [0 2 0] [2 0 0]] [1 1 1]) (cad/curve [[-2 0 2] [0 3 2] [2 0 2]] [1 1 1])])
+(defn- feature-model [sections segments]
+  (let [sources (mapv (fn [index section] (cad/feature (keyword (str "section-" index)) :source [] {:value section})) (range) sections)]
+    (cad/feature-model (conj sources (cad/feature :loft :loft (mapv :feature/id sources) {:segments segments})))))
 (defonce state (atom {:sections (sections) :segments 16 :selected-section 0 :selected-point 1
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
                       :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0
-                      :measurement-tolerance 0.000001
+                      :measurement-tolerance 0.000001 :feature-model (feature-model (sections) 16)
                       :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
 (defonce viewport (atom nil))
 (defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
@@ -28,7 +31,7 @@
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
                                                           (first (first (:cad/control-points (first (:sections @state))))))
                                          :controlPoints (mapv :cad/control-points (:sections @state))}))))))
-(defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :future [] :save-status :dirty) (update :revision inc)))) (upload!))
+(defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :feature-model (feature-model sections (:segments s)) :future [] :save-status :dirty) (update :revision inc)))) (upload!))
 (defn- draw! [] (when-let [{:keys [buffers] :as v} @viewport] (when buffers (let [{:keys [azimuth elevation]} @state d 8 eye [(* d (js/Math.cos elevation) (js/Math.cos azimuth)) (* d (js/Math.sin elevation)) (* d (js/Math.cos elevation) (js/Math.sin azimuth))]] (gpu/render-frame! v buffers eye [0 1 1] [0.45 0.7 1.0])))) (js/requestAnimationFrame draw!))
 (defn- num [id] (js/parseFloat (.-value (.getElementById js/document id))))
 (defn- sync-point-fields! []
@@ -87,10 +90,11 @@
 (def ^:private storage-key "kami.cad.project.v2")
 (def ^:private backup-key "kami.cad.project.backup")
 (defn- project-document []
-  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width measurement-tolerance profile]} @state]
+  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width measurement-tolerance profile feature-model]} @state]
     (project/document {:id project-id :name project-name :sections sections :tessellation segments
                        :selection {:section selected-section :point selected-point} :camera {:azimuth azimuth :elevation elevation}
-                       :precision {:snap snap :sketch-width sketch-width :measurement-tolerance measurement-tolerance} :interaction {:profile profile}})))
+                       :precision {:snap snap :sketch-width sketch-width :measurement-tolerance measurement-tolerance} :interaction {:profile profile}
+                       :feature-model feature-model})))
 (defn- save-project! []
   (let [data (pr-str (project-document)) old (.getItem js/localStorage storage-key)]
     (when old (.setItem js/localStorage backup-key old)) (.setItem js/localStorage storage-key data)
@@ -102,6 +106,7 @@
            :segments (:project/tessellation p) :selected-section (:section selection) :selected-point (:point selection)
            :azimuth (:azimuth camera) :elevation (:elevation camera) :snap (:snap precision) :sketch-width (:sketch-width precision)
            :measurement-tolerance (:measurement-tolerance precision 0.000001)
+           :feature-model (or (:project/feature-model p) (feature-model (:project/sections p) (:project/tessellation p)))
            :profile (:profile interaction) :history [] :future [] :save-status :saved)
     (doseq [[id value] [["segments" (:project/tessellation p)] ["section-index" (:section selection)] ["point-index" (:point selection)]
                         ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)]

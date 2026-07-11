@@ -14,3 +14,11 @@
                              :selection {:section 0 :point 0} :camera {} :precision {:snap 0.5 :sketch-width 4}
                              :interaction {:profile :rhino}})]
     (is (= 0.0005 (get-in (project/open p) [:project/precision :snap])))))
+
+(deftest migrates-version-two-for-feature-history
+  (let [v3 (project/document {:sections sections :tessellation 16 :selection {} :camera {}
+                              :precision {:snap 0.001} :interaction {}})
+        migrated (project/open (-> v3 (assoc :kami/version 2) (dissoc :project/feature-model)))]
+    (is (= 3 (:kami/version migrated)))
+    (is (contains? migrated :project/feature-model))
+    (is (nil? (:project/feature-model migrated)))))
