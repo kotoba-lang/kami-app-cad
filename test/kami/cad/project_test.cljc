@@ -19,6 +19,8 @@
   (let [v3 (project/document {:sections sections :tessellation 16 :selection {} :camera {}
                               :precision {:snap 0.001} :interaction {}})
         migrated (project/open (-> v3 (assoc :kami/version 2) (dissoc :project/feature-model)))]
-    (is (= 3 (:kami/version migrated)))
+    (is (= 4 (:kami/version migrated)))
     (is (contains? migrated :project/feature-model))
-    (is (nil? (:project/feature-model migrated)))))
+    (is (nil? (:project/feature-model migrated)))
+    (is (= :loft (:project/view-mode migrated)))
+    (is (nil? (:project/solid migrated)))))

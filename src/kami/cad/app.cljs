@@ -8,9 +8,12 @@
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
                       :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0
                       :measurement-tolerance 0.000001 :feature-model (feature-model (sections) 16) :selected-feature :loft
+                      :solid nil :view-mode :loft :extrude-height 2.0
                       :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
 (defonce viewport (atom nil))
-(defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
+(defn- mesh [] (if (and (= :solid (:view-mode @state)) (:solid @state))
+                 (cad/solid-mesh (:solid @state))
+                 (cad/loft-mesh (cad/loft (:sections @state) (:segments @state)))))
 (defn- measurements []
   (let [selected (nth (:sections @state) (:selected-section @state))
         box (cad/bounds (mapcat #(cad/tessellate % 128) (:sections @state)))]
@@ -32,6 +35,7 @@
                                          :projectVersion project/current-version :revision (:revision @state) :saveStatus (name (:save-status @state))
                                          :measuredLength (:length measurement) :boundsSize (get-in measurement [:bounds :size])
                                          :featureStatuses (:feature-model/statuses rebuilt) :selectedFeature (name (:selected-feature @state))
+                                         :viewMode (name (:view-mode @state)) :solidVolume (when-let [solid (:solid @state)] (cad/solid-volume solid))
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
                                                           (first (first (:cad/control-points (first (:sections @state))))))
                                          :controlPoints (mapv :cad/control-points (:sections @state))})))
@@ -103,11 +107,11 @@
 (def ^:private storage-key "kami.cad.project.v2")
 (def ^:private backup-key "kami.cad.project.backup")
 (defn- project-document []
-  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width measurement-tolerance profile feature-model]} @state]
+  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width measurement-tolerance profile feature-model solid view-mode]} @state]
     (project/document {:id project-id :name project-name :sections sections :tessellation segments
                        :selection {:section selected-section :point selected-point} :camera {:azimuth azimuth :elevation elevation}
                        :precision {:snap snap :sketch-width sketch-width :measurement-tolerance measurement-tolerance} :interaction {:profile profile}
-                       :feature-model feature-model})))
+                       :feature-model feature-model :solid solid :view-mode view-mode})))
 (defn- save-project! []
   (let [data (pr-str (project-document)) old (.getItem js/localStorage storage-key)]
     (when old (.setItem js/localStorage backup-key old)) (.setItem js/localStorage storage-key data)
@@ -120,6 +124,7 @@
            :azimuth (:azimuth camera) :elevation (:elevation camera) :snap (:snap precision) :sketch-width (:sketch-width precision)
            :measurement-tolerance (:measurement-tolerance precision 0.000001)
            :feature-model (or (:project/feature-model p) (feature-model (:project/sections p) (:project/tessellation p)))
+           :solid (:project/solid p) :view-mode (:project/view-mode p :loft)
            :profile (:profile interaction) :history [] :future [] :save-status :saved)
     (doseq [[id value] [["segments" (:project/tessellation p)] ["section-index" (:section selection)] ["point-index" (:point selection)]
                         ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)]
@@ -184,6 +189,16 @@
                         (commit! sections)
                         (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "reset") "click" #(do (swap! state assoc :selected-section 0) (commit! (sections)) (sync-section-options!) (sync-point-fields!)))
+  (.addEventListener (.getElementById js/document "extrude-solid") "click"
+                     #(let [width (max 0.1 (num "sketch-width")) depth (max 0.1 (num "solid-depth")) height (max 0.01 (num "extrude-height"))
+                            w (/ width 2) d (/ depth 2)
+                            solid (cad/extrude-polygon [[(- w) (- d) 0] [w (- d) 0] [w d 0] [(- w) d 0]] [0 0 height])]
+                        (swap! state assoc :solid solid :view-mode :solid :extrude-height height :save-status :dirty)
+                        (set! (.-textContent (.getElementById js/document "solid-result"))
+                              (str "Volume " (.toFixed (cad/solid-volume solid) 3) " m³ · watertight"))
+                        (upload!)))
+  (.addEventListener (.getElementById js/document "show-loft") "click" #(do (swap! state assoc :view-mode :loft) (upload!)))
+  (.addEventListener (.getElementById js/document "show-solid") "click" #(when (:solid @state) (swap! state assoc :view-mode :solid) (upload!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))
   (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value)) :save-status :dirty) (upload!)))
   (.addEventListener (.getElementById js/document "toggle-feature") "click"
