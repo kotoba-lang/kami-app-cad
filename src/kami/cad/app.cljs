@@ -1,8 +1,9 @@
-(ns kami.cad.app (:require [kami.cad :as cad] [kami.webgpu.mesh :as gpu]))
+(ns kami.cad.app (:require [cljs.reader :as reader] [kami.cad :as cad] [kami.cad.project :as project] [kami.webgpu.mesh :as gpu]))
 (defn sections [] [(cad/curve [[-2 0 0] [0 2 0] [2 0 0]] [1 1 1]) (cad/curve [[-2 0 2] [0 3 2] [2 0 2]] [1 1 1])])
 (defonce state (atom {:sections (sections) :segments 16 :selected-section 0 :selected-point 1
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
-                      :profile :rhino :last-command nil :command-status "Ready"}))
+                      :profile :rhino :last-command nil :command-status "Ready" :snap 0.1 :sketch-width 4.0
+                      :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
 (defonce viewport (atom nil))
 (defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
 (defn- upload! []
@@ -13,10 +14,11 @@
       (set! (.-textContent (.getElementById js/document "debug-state"))
             (js/JSON.stringify (clj->js {:segments (:segments @state) :profile (name (:profile @state))
                                          :lastCommand (:last-command @state) :commandStatus (:command-status @state)
+                                         :projectVersion project/current-version :revision (:revision @state) :saveStatus (name (:save-status @state))
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
                                                           (first (first (:cad/control-points (first (:sections @state))))))
                                          :controlPoints (mapv :cad/control-points (:sections @state))}))))))
-(defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :future [])))) (upload!))
+(defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :future [] :save-status :dirty) (update :revision inc)))) (upload!))
 (defn- draw! [] (when-let [{:keys [buffers] :as v} @viewport] (when buffers (let [{:keys [azimuth elevation]} @state d 8 eye [(* d (js/Math.cos elevation) (js/Math.cos azimuth)) (* d (js/Math.sin elevation)) (* d (js/Math.cos elevation) (js/Math.sin azimuth))]] (gpu/render-frame! v buffers eye [0 1 1] [0.45 0.7 1.0])))) (js/requestAnimationFrame draw!))
 (defn- num [id] (js/parseFloat (.-value (.getElementById js/document id))))
 (defn- sync-point-fields! []
@@ -44,6 +46,37 @@
 (defn- editable-target? [event]
   (let [target (.-target event) tag (some-> target .-tagName .toLowerCase)]
     (or (#{"input" "select" "textarea"} tag) (.-isContentEditable target))))
+(def ^:private storage-key "kami.cad.project.v2")
+(def ^:private backup-key "kami.cad.project.backup")
+(defn- project-document []
+  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width profile]} @state]
+    (project/document {:id project-id :name project-name :sections sections :tessellation segments
+                       :selection {:section selected-section :point selected-point} :camera {:azimuth azimuth :elevation elevation}
+                       :precision {:snap snap :sketch-width sketch-width} :interaction {:profile profile}})))
+(defn- save-project! []
+  (let [data (pr-str (project-document)) old (.getItem js/localStorage storage-key)]
+    (when old (.setItem js/localStorage backup-key old)) (.setItem js/localStorage storage-key data)
+    (swap! state assoc :save-status :saved) (upload!)))
+(defn- apply-project! [value]
+  (let [p (project/open value) selection (:project/selection p) camera (:project/camera p)
+        precision (:project/precision p) interaction (:project/interaction p)]
+    (swap! state assoc :project-id (:project/id p) :project-name (:project/name p) :sections (:project/sections p)
+           :segments (:project/tessellation p) :selected-section (:section selection) :selected-point (:point selection)
+           :azimuth (:azimuth camera) :elevation (:elevation camera) :snap (:snap precision) :sketch-width (:sketch-width precision)
+           :profile (:profile interaction) :history [] :future [] :save-status :saved)
+    (doseq [[id value] [["segments" (:project/tessellation p)] ["section-index" (:section selection)] ["point-index" (:point selection)]
+                        ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)] ["profile" (name (:profile interaction))]]]
+      (set! (.-value (.getElementById js/document id)) value))
+    (sync-point-fields!) (upload!)))
+(defn- load-project! []
+  (when-let [data (.getItem js/localStorage storage-key)]
+    (try (apply-project! (reader/read-string data))
+         (catch :default _ (when-let [backup (.getItem js/localStorage backup-key)] (apply-project! (reader/read-string backup)))))))
+(defn- download-project! []
+  (let [a (.createElement js/document "a") url (.createObjectURL js/URL (js/Blob. #js [(pr-str (project-document))] #js {:type "application/edn"}))]
+    (set! (.-href a) url) (set! (.-download a) "design.kami-cad.edn") (.click a) (js/setTimeout #(.revokeObjectURL js/URL url) 0)))
+(defn- import-project! [event]
+  (when-let [file (aget (.. event -target -files) 0)] (-> (.text file) (.then #(apply-project! (reader/read-string %))))))
 (defn ^:export init! []
  (let [canvas (.getElementById js/document "gpu-canvas") drag (atom nil)]
   (-> (gpu/init-canvas! canvas) (.then (fn [v] (reset! viewport v) (upload!) (set! (.-textContent (.getElementById js/document "gpu-status")) "") (draw!))))
@@ -83,7 +116,9 @@
                         (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "reset") "click" #(do (commit! (sections)) (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))
-  (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value))) (upload!)))
+  (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value)) :save-status :dirty) (upload!)))
+  (.addEventListener (.getElementById js/document "snap") "change" #(swap! state assoc :snap (num "snap") :save-status :dirty))
+  (.addEventListener (.getElementById js/document "sketch-width") "change" #(swap! state assoc :sketch-width (num "sketch-width") :save-status :dirty))
   (.addEventListener (.getElementById js/document "profile") "change"
                      #(do (swap! state assoc :profile (keyword (.. % -target -value)))
                           (set! (.-textContent (.getElementById js/document "profile-hint"))
@@ -100,4 +135,8 @@
   (.addEventListener (.getElementById js/document "redo") "click" (fn [] (when-let [next (peek (:future @state))] (swap! state (fn [s] (assoc s :sections next :future (pop (:future s)) :history (conj (:history s) (:sections s))))) (upload!))))
   (.addEventListener canvas "pointerdown" #(reset! drag [(.-clientX %) (.-clientY %)])) (.addEventListener js/window "pointerup" #(reset! drag nil))
   (.addEventListener js/window "pointermove" (fn [e] (when-let [[x y] @drag] (swap! state update :azimuth + (* 0.008 (- (.-clientX e) x))) (swap! state update :elevation #(max -1.2 (min 1.2 (+ % (* 0.008 (- (.-clientY e) y)))))) (reset! drag [(.-clientX e) (.-clientY e)]))))
-  (.addEventListener (.getElementById js/document "export") "click" #(let [a (.createElement js/document "a")] (set! (.-href a) (.createObjectURL js/URL (js/Blob. #js [(pr-str (:sections @state))] #js {:type "application/edn"}))) (set! (.-download a) "cad-project.edn") (.click a)))))
+  (.addEventListener (.getElementById js/document "save-project") "click" save-project!)
+  (.addEventListener (.getElementById js/document "load-project") "click" load-project!)
+  (.addEventListener (.getElementById js/document "import") "click" #(.click (.getElementById js/document "import-file")))
+  (.addEventListener (.getElementById js/document "import-file") "change" import-project!)
+  (.addEventListener (.getElementById js/document "export") "click" download-project!)))
