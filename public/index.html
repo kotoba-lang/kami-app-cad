@@ -30,6 +30,10 @@ button { cursor: pointer; }</style></head>
       <aside>
         <h2>Model</h2>
         <button class="primary">Loft Surface</button>
+        <h2>Dimensional sketch</h2>
+        <label>Section width (m)<input id="sketch-width" type="number" min="0.1" step="0.1" value="4"></label>
+        <button id="solve-width">Solve width constraint</button>
+        <p id="solver-status">Fully constrained</p>
         <h2>Tools</h2>
         <button id="fit">Fit View</button>
         <button id="reset">Reset Sections</button>

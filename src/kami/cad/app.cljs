@@ -11,6 +11,8 @@
       (set! (.-textContent (.getElementById js/document "stats")) (str "2 sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
       (set! (.-textContent (.getElementById js/document "debug-state"))
             (js/JSON.stringify (clj->js {:segments (:segments @state)
+                                         :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
+                                                          (first (first (:cad/control-points (first (:sections @state))))))
                                          :controlPoints (mapv :cad/control-points (:sections @state))}))))))
 (defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :future [])))) (upload!))
 (defn- draw! [] (when-let [{:keys [buffers] :as v} @viewport] (when buffers (let [{:keys [azimuth elevation]} @state d 8 eye [(* d (js/Math.cos elevation) (js/Math.cos azimuth)) (* d (js/Math.sin elevation)) (* d (js/Math.cos elevation) (js/Math.sin azimuth))]] (gpu/render-frame! v buffers eye [0 1 1] [0.45 0.7 1.0])))) (js/requestAnimationFrame draw!))
@@ -39,6 +41,25 @@
   (.addEventListener (.getElementById js/document "trim") "click"
                      #(let [t0 (num "trim-start") t1 (num "trim-end")]
                         (commit! (mapv (fn [section] (cad/trim-curve section t0 t1)) (:sections @state)))
+                        (sync-point-fields!)))
+  (.addEventListener (.getElementById js/document "solve-width") "click"
+                     #(let [width (max 0.1 (num "sketch-width")) half (/ width 2)
+                            sketch (cad/sketch [(cad/sketch-point :left (- half) 0 true)
+                                                (cad/sketch-point :right (+ half 0.35) 0.2)]
+                                               [(cad/sketch-line :baseline :left :right)]
+                                               [(cad/horizontal :horizontal :baseline)
+                                                (cad/distance-constraint :width :left :right width)])
+                            solved (cad/solve-sketch sketch)
+                            [left _] (get-in solved [:sketch/points :left :sketch.point/position])
+                            [right _] (get-in solved [:sketch/points :right :sketch.point/position])
+                            sections (mapv (fn [section]
+                                             (-> section
+                                                 (cad/move-control-point 0 (assoc (get-in section [:cad/control-points 0]) 0 left))
+                                                 (cad/move-control-point 2 (assoc (get-in section [:cad/control-points 2]) 0 right))))
+                                           (:sections @state))]
+                        (set! (.-textContent (.getElementById js/document "solver-status"))
+                              (if (get-in solved [:sketch/solver :converged?]) "Fully constrained" "Constraint conflict"))
+                        (commit! sections)
                         (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "reset") "click" #(do (commit! (sections)) (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))
