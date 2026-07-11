@@ -1,21 +1,30 @@
-(ns kami.cad.app (:require [cljs.reader :as reader] [kami.cad :as cad] [kami.cad.project :as project] [kami.webgpu.mesh :as gpu]))
+(ns kami.cad.app (:require [cljs.reader :as reader] [clojure.string :as string]
+                           [kami.cad :as cad] [kami.cad.project :as project] [kami.webgpu.mesh :as gpu]))
 (defn sections [] [(cad/curve [[-2 0 0] [0 2 0] [2 0 0]] [1 1 1]) (cad/curve [[-2 0 2] [0 3 2] [2 0 2]] [1 1 1])])
 (defonce state (atom {:sections (sections) :segments 16 :selected-section 0 :selected-point 1
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
                       :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0
+                      :measurement-tolerance 0.000001
                       :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
 (defonce viewport (atom nil))
 (defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
+(defn- measurements []
+  (let [selected (nth (:sections @state) (:selected-section @state))
+        box (cad/bounds (mapcat #(cad/tessellate % 128) (:sections @state)))]
+    {:length (cad/curve-length selected (:measurement-tolerance @state)) :bounds box}))
 (defn- upload! []
   (when-let [v @viewport]
-    (let [m (mesh)]
+    (let [m (mesh) measurement (measurements)]
       (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m))
       (set! (.-textContent (.getElementById js/document "stats")) (str (count (:sections @state)) " sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
+      (set! (.-textContent (.getElementById js/document "measurement-result"))
+            (str "Length " (.toFixed (:length measurement) 6) " m · Size " (string/join " × " (map #(.toFixed % 4) (get-in measurement [:bounds :size]))) " m"))
       (set! (.-textContent (.getElementById js/document "debug-state"))
             (js/JSON.stringify (clj->js {:segments (:segments @state) :snap (:snap @state) :sectionCount (count (:sections @state))
                                          :selectedSection (:selected-section @state) :profile (name (:profile @state))
                                          :lastCommand (:last-command @state) :commandStatus (:command-status @state)
                                          :projectVersion project/current-version :revision (:revision @state) :saveStatus (name (:save-status @state))
+                                         :measuredLength (:length measurement) :boundsSize (get-in measurement [:bounds :size])
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
                                                           (first (first (:cad/control-points (first (:sections @state))))))
                                          :controlPoints (mapv :cad/control-points (:sections @state))}))))))
@@ -78,10 +87,10 @@
 (def ^:private storage-key "kami.cad.project.v2")
 (def ^:private backup-key "kami.cad.project.backup")
 (defn- project-document []
-  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width profile]} @state]
+  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width measurement-tolerance profile]} @state]
     (project/document {:id project-id :name project-name :sections sections :tessellation segments
                        :selection {:section selected-section :point selected-point} :camera {:azimuth azimuth :elevation elevation}
-                       :precision {:snap snap :sketch-width sketch-width} :interaction {:profile profile}})))
+                       :precision {:snap snap :sketch-width sketch-width :measurement-tolerance measurement-tolerance} :interaction {:profile profile}})))
 (defn- save-project! []
   (let [data (pr-str (project-document)) old (.getItem js/localStorage storage-key)]
     (when old (.setItem js/localStorage backup-key old)) (.setItem js/localStorage storage-key data)
@@ -92,9 +101,11 @@
     (swap! state assoc :project-id (:project/id p) :project-name (:project/name p) :sections (:project/sections p)
            :segments (:project/tessellation p) :selected-section (:section selection) :selected-point (:point selection)
            :azimuth (:azimuth camera) :elevation (:elevation camera) :snap (:snap precision) :sketch-width (:sketch-width precision)
+           :measurement-tolerance (:measurement-tolerance precision 0.000001)
            :profile (:profile interaction) :history [] :future [] :save-status :saved)
     (doseq [[id value] [["segments" (:project/tessellation p)] ["section-index" (:section selection)] ["point-index" (:point selection)]
-                        ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)] ["profile" (name (:profile interaction))]]]
+                        ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)]
+                        ["measurement-tolerance" (:measurement-tolerance precision 0.000001)] ["profile" (name (:profile interaction))]]]
       (set! (.-value (.getElementById js/document id)) value))
     (sync-section-options!) (sync-point-fields!) (upload!)))
 (defn- load-project! []
@@ -106,6 +117,12 @@
     (set! (.-href a) url) (set! (.-download a) "design.kami-cad.edn") (.click a) (js/setTimeout #(.revokeObjectURL js/URL url) 0)))
 (defn- import-project! [event]
   (when-let [file (aget (.. event -target -files) 0)] (-> (.text file) (.then #(apply-project! (reader/read-string %))))))
+(defn- download-measurements! []
+  (let [{:keys [length bounds]} (measurements) a (.createElement js/document "a")
+        data (str "property,x,y,z\nmin," (string/join "," (:min bounds)) "\nmax," (string/join "," (:max bounds))
+                  "\nsize," (string/join "," (:size bounds)) "\ncurve_length," length ",,")
+        url (.createObjectURL js/URL (js/Blob. #js [data] #js {:type "text/csv;charset=utf-8"}))]
+    (set! (.-href a) url) (set! (.-download a) "cad-measurements.csv") (.click a) (js/setTimeout #(.revokeObjectURL js/URL url) 0)))
 (defn ^:export init! []
  (let [canvas (.getElementById js/document "gpu-canvas") drag (atom nil)]
   (.setAttribute (.getElementById js/document "snap") "aria-label" "Precision snap increment")
@@ -153,6 +170,9 @@
   (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value)) :save-status :dirty) (upload!)))
   (.addEventListener (.getElementById js/document "snap") "change" #(swap! state assoc :snap (num "snap") :save-status :dirty))
   (.addEventListener (.getElementById js/document "sketch-width") "change" #(swap! state assoc :sketch-width (num "sketch-width") :save-status :dirty))
+  (.addEventListener (.getElementById js/document "measurement-tolerance") "change"
+                     #(do (swap! state assoc :measurement-tolerance (max 1.0e-10 (num "measurement-tolerance"))) (upload!)))
+  (.addEventListener (.getElementById js/document "export-measurements") "click" download-measurements!)
   (.addEventListener (.getElementById js/document "profile") "change"
                      #(do (swap! state assoc :profile (keyword (.. % -target -value)))
                           (set! (.-textContent (.getElementById js/document "profile-hint"))

@@ -48,6 +48,10 @@ button { cursor: pointer; } :focus-visible { outline: 3px solid #ffd166; outline
         <div class="stats" id="stats">2 sections · 34 vertices</div>
       </section>
       <aside>
+        <h2>Measurements</h2>
+        <label>Tolerance (m)<input id="measurement-tolerance" type="number" min="0.0000000001" step="0.000001" value="0.000001"></label>
+        <p id="measurement-result">Measuring…</p>
+        <button id="export-measurements">Export measurements CSV</button>
         <h2>Control Point</h2>
         <label>Section<select id="section-index">
           <option value="0">Section 1</option>
