@@ -7,7 +7,7 @@
 (defonce state (atom {:sections (sections) :segments 16 :selected-section 0 :selected-point 1
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
                       :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0
-                      :measurement-tolerance 0.000001 :feature-model (feature-model (sections) 16)
+                      :measurement-tolerance 0.000001 :feature-model (feature-model (sections) 16) :selected-feature :loft
                       :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
 (defonce viewport (atom nil))
 (defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
@@ -17,8 +17,11 @@
     {:length (cad/curve-length selected (:measurement-tolerance @state)) :bounds box}))
 (defn- upload! []
   (when-let [v @viewport]
-    (let [m (mesh) measurement (measurements)]
-      (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m))
+    (let [rebuilt (cad/recompute-feature-model (:feature-model @state))
+          _ (swap! state assoc :feature-model rebuilt)
+          surface (get-in rebuilt [:feature-model/results :loft])
+          m (when surface (cad/loft-mesh surface)) measurement (measurements)]
+      (when m (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m)))
       (set! (.-textContent (.getElementById js/document "stats")) (str (count (:sections @state)) " sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
       (set! (.-textContent (.getElementById js/document "measurement-result"))
             (str "Length " (.toFixed (:length measurement) 6) " m · Size " (string/join " × " (map #(.toFixed % 4) (get-in measurement [:bounds :size]))) " m"))
@@ -28,9 +31,19 @@
                                          :lastCommand (:last-command @state) :commandStatus (:command-status @state)
                                          :projectVersion project/current-version :revision (:revision @state) :saveStatus (name (:save-status @state))
                                          :measuredLength (:length measurement) :boundsSize (get-in measurement [:bounds :size])
+                                         :featureStatuses (:feature-model/statuses rebuilt) :selectedFeature (name (:selected-feature @state))
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
                                                           (first (first (:cad/control-points (first (:sections @state))))))
-                                         :controlPoints (mapv :cad/control-points (:sections @state))}))))))
+                                         :controlPoints (mapv :cad/control-points (:sections @state))})))
+      (let [tree (.getElementById js/document "feature-tree")]
+        (set! (.-innerHTML tree) "")
+        (doseq [feature (:feature-model/features rebuilt)]
+          (let [button (.createElement js/document "button") id (:feature/id feature)
+                status (get-in rebuilt [:feature-model/statuses id :status])]
+            (set! (.-textContent button) (str (if (:feature/suppressed? feature) "⊘ " "◆ ") (name id) " · " (name status)))
+            (when (= id (:selected-feature @state)) (.add (.-classList button) "primary"))
+            (.addEventListener button "click" #(do (swap! state assoc :selected-feature id) (upload!)))
+            (.appendChild tree button)))))))
 (defn- commit! [sections] (swap! state (fn [s] (-> s (update :history conj (:sections s)) (assoc :sections sections :feature-model (feature-model sections (:segments s)) :future [] :save-status :dirty) (update :revision inc)))) (upload!))
 (defn- draw! [] (when-let [{:keys [buffers] :as v} @viewport] (when buffers (let [{:keys [azimuth elevation]} @state d 8 eye [(* d (js/Math.cos elevation) (js/Math.cos azimuth)) (* d (js/Math.sin elevation)) (* d (js/Math.cos elevation) (js/Math.sin azimuth))]] (gpu/render-frame! v buffers eye [0 1 1] [0.45 0.7 1.0])))) (js/requestAnimationFrame draw!))
 (defn- num [id] (js/parseFloat (.-value (.getElementById js/document id))))
@@ -173,6 +186,12 @@
   (.addEventListener (.getElementById js/document "reset") "click" #(do (swap! state assoc :selected-section 0) (commit! (sections)) (sync-section-options!) (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))
   (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value)) :save-status :dirty) (upload!)))
+  (.addEventListener (.getElementById js/document "toggle-feature") "click"
+                     #(let [id (:selected-feature @state)
+                            feature (first (filter (fn [f] (= id (:feature/id f))) (get-in @state [:feature-model :feature-model/features])))]
+                        (swap! state update :feature-model cad/suppress-feature id (not (:feature/suppressed? feature)))
+                        (swap! state assoc :save-status :dirty) (upload!)))
+  (.addEventListener (.getElementById js/document "recompute-features") "click" upload!)
   (.addEventListener (.getElementById js/document "snap") "change" #(swap! state assoc :snap (num "snap") :save-status :dirty))
   (.addEventListener (.getElementById js/document "sketch-width") "change" #(swap! state assoc :sketch-width (num "sketch-width") :save-status :dirty))
   (.addEventListener (.getElementById js/document "measurement-tolerance") "change"
