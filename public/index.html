@@ -1,33 +1,60 @@
 <!DOCTYPE html>
-<html>
-  <head><meta charset="utf-8"><title>Kami CAD</title><style>body { margin: 0; font-family: system-ui; background: #101522; color: #edf2ff; }
-header { padding: 16px; background: #202c49; }
-main { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 52px); }
-aside { padding: 18px; background: #161e33; }
-.canvas { margin: 22px; border: 1px solid #5972ad; background: repeating-linear-gradient(0deg,transparent,transparent 24px,#263657 25px),repeating-linear-gradient(90deg,transparent,transparent 24px,#263657 25px); }
-svg { width: 100%; height: 100%; }
-button { display: block; width: 100%; margin: 8px 0; padding: 10px; background: #2d4275; color: #fff; border: 1px solid #7898e5; border-radius: 6px; }</style></head>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><title>Kami CAD</title><style>aside:last-child { border-left: 1px solid #32466e; border-right: 0; }
+.stats { position: absolute; right: 14px; bottom: 14px; background: #08101dcc; padding: 8px; }
+* { box-sizing: border-box; }
+.primary { background: #79a2ff; color: #071227; font-weight: 700; }
+.viewport { position: relative; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: 52px 1fr; font-family: Inter,system-ui; background: #090e18; color: #edf2ff; }
+label { display: grid; gap: 4px; margin: 10px 0; }
+h2 { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #a8bce3; }
+button,input,select { width: 100%; margin: 5px 0; padding: 8px; background: #20345c; color: #fff; border: 1px solid #5878b4; border-radius: 5px; }
+main { display: grid; grid-template-columns: 230px 1fr 270px; min-height: 0; }
+header .spacer { flex: 1; }
+#gpu-canvas { width: 100%; height: 100%; display: block; }
+#gpu-status { position: absolute; left: 50%; top: 45%; transform: translate(-50%,-50%); color: #ffb0b0; }
+aside { padding: 16px; background: #101a2e; border-right: 1px solid #32466e; }
+header { display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #17223b; }
+button { cursor: pointer; }</style></head>
   <body>
     <header>
-      <strong>KAMI CAD · NURBS WORKSPACE</strong>
+      <strong>KAMI CAD · NURBS</strong>
+      <a href="https://kotoba-lang.github.io/kami-studio/">Studio</a>
+      <span>WebGPU precision workspace</span>
+      <span class="spacer"></span>
+      <button id="undo">Undo</button>
+      <button id="redo">Redo</button>
+      <button id="export">Export EDN</button>
     </header>
     <main>
       <aside>
-        <h3>Curve tools</h3>
-        <button>Control point</button>
-        <button>Loft</button>
-        <button>Sweep</button>
-        <h3>Precision</h3>
-        <button>Snap · 1 mm</button>
-        <button>Dimensions</button>
+        <h2>Model</h2>
+        <button class="primary">Loft Surface</button>
+        <h2>Tools</h2>
+        <button id="select-cp">Control Point</button>
+        <button id="fit">Fit View</button>
+        <h2>Precision</h2>
+        <select id="snap">
+          <option value="0.1">Snap 0.1 mm</option>
+          <option value="0.5">Snap 0.5 mm</option>
+          <option value="1">Snap 1 mm</option>
+        </select>
       </aside>
-      <section class="canvas">
-        <svg viewBox="0 0 800 560">
-          <path d="M 80 420 C 180 70, 550 80, 720 360" fill="none" stroke="#9bb9ff" stroke-width="5"></path>
-          <circle cx="80" cy="420" r="8" fill="#ffd18f"></circle>
-          <circle cx="720" cy="360" r="8" fill="#ffd18f"></circle>
-        </svg>
+      <section class="viewport">
+        <canvas id="gpu-canvas" aria-label="NURBS WebGPU viewport"></canvas>
+        <div id="gpu-status">Initializing WebGPU…</div>
+        <div class="stats" id="stats">2 sections · 34 vertices</div>
       </section>
+      <aside>
+        <h2>Control Point 2</h2>
+        <label>X<input id="cp-x" type="number" step="0.1" value="0"></label>
+        <label>Y<input id="cp-y" type="number" step="0.1" value="2"></label>
+        <label>Z<input id="cp-z" type="number" step="0.1" value="0"></label>
+        <label>Weight<input id="weight" type="number" min="0.1" step="0.1" value="1"></label>
+        <label>Tessellation<input id="segments" type="range" min="4" max="64" value="16"></label>
+        <button class="primary" id="apply">Apply exact values</button>
+      </aside>
     </main>
+    <script src="./js/app.js"></script>
   </body>
 </html>
