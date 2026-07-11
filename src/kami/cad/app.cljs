@@ -10,9 +10,10 @@
   (when-let [v @viewport]
     (let [m (mesh)]
       (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m))
-      (set! (.-textContent (.getElementById js/document "stats")) (str "2 sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
+      (set! (.-textContent (.getElementById js/document "stats")) (str (count (:sections @state)) " sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
       (set! (.-textContent (.getElementById js/document "debug-state"))
-            (js/JSON.stringify (clj->js {:segments (:segments @state) :profile (name (:profile @state))
+            (js/JSON.stringify (clj->js {:segments (:segments @state) :sectionCount (count (:sections @state))
+                                         :selectedSection (:selected-section @state) :profile (name (:profile @state))
                                          :lastCommand (:last-command @state) :commandStatus (:command-status @state)
                                          :projectVersion project/current-version :revision (:revision @state) :saveStatus (name (:save-status @state))
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
@@ -28,6 +29,34 @@
     (doseq [[id value] (map vector ["cp-x" "cp-y" "cp-z"] point)]
       (set! (.-value (.getElementById js/document id)) value))
     (set! (.-value (.getElementById js/document "weight")) weight)))
+(defn- sync-section-options! []
+  (let [select (.getElementById js/document "section-index") selected (:selected-section @state)]
+    (set! (.-innerHTML select) "")
+    (doseq [index (range (count (:sections @state)))]
+      (let [option (.createElement js/document "option")]
+        (set! (.-value option) index) (set! (.-textContent option) (str "Section " (inc index)))
+        (.appendChild select option)))
+    (set! (.-value select) selected)))
+(defn- offset-section [section dz]
+  (update section :cad/control-points #(mapv (fn [[x y z]] [x y (+ z dz)]) %)))
+(defn- duplicate-section! []
+  (let [{:keys [sections selected-section]} @state source (nth sections selected-section)
+        zs (mapcat #(map (fn [p] (nth p 2)) (:cad/control-points %)) sections)
+        dz (max 0.1 (/ (- (reduce max zs) (reduce min zs)) (max 1 (dec (count sections)))))
+        insert-at (inc selected-section) result (vec (concat (subvec sections 0 insert-at)
+                                                             [(offset-section source dz)] (subvec sections insert-at)))]
+    (swap! state assoc :selected-section insert-at) (commit! result) (sync-section-options!) (sync-point-fields!)))
+(defn- delete-section! []
+  (when (> (count (:sections @state)) 2)
+    (let [index (:selected-section @state) result (vec (concat (subvec (:sections @state) 0 index)
+                                                               (subvec (:sections @state) (inc index))))]
+      (swap! state assoc :selected-section (min index (dec (count result))))
+      (commit! result) (sync-section-options!) (sync-point-fields!))))
+(defn- move-section! [delta]
+  (let [index (:selected-section @state) target (+ index delta) sections (:sections @state)]
+    (when (< -1 target (count sections))
+      (let [a (nth sections index) b (nth sections target) result (assoc sections index b target a)]
+        (swap! state assoc :selected-section target) (commit! result) (sync-section-options!) (sync-point-fields!)))))
 (def command-aliases
   {:rhino {"trim" :trim "fit" :fit "zoom extents" :fit "reset" :reset "solvewidth" :solve-width "undo" :undo "redo" :redo}
    :autocad {"tr" :trim "trim" :trim "z" :fit "ze" :fit "regen" :reset "dim" :solve-width "u" :undo "redo" :redo}
@@ -67,7 +96,7 @@
     (doseq [[id value] [["segments" (:project/tessellation p)] ["section-index" (:section selection)] ["point-index" (:point selection)]
                         ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)] ["profile" (name (:profile interaction))]]]
       (set! (.-value (.getElementById js/document id)) value))
-    (sync-point-fields!) (upload!)))
+    (sync-section-options!) (sync-point-fields!) (upload!)))
 (defn- load-project! []
   (when-let [data (.getItem js/localStorage storage-key)]
     (try (apply-project! (reader/read-string data))
@@ -91,6 +120,10 @@
                                    :selected-section (js/parseInt (.-value (.getElementById js/document "section-index")))
                                    :selected-point (js/parseInt (.-value (.getElementById js/document "point-index"))))
                             (sync-point-fields!))))
+  (.addEventListener (.getElementById js/document "duplicate-section") "click" duplicate-section!)
+  (.addEventListener (.getElementById js/document "delete-section") "click" delete-section!)
+  (.addEventListener (.getElementById js/document "section-up") "click" #(move-section! -1))
+  (.addEventListener (.getElementById js/document "section-down") "click" #(move-section! 1))
   (.addEventListener (.getElementById js/document "trim") "click"
                      #(let [t0 (num "trim-start") t1 (num "trim-end")]
                         (commit! (mapv (fn [section] (cad/trim-curve section t0 t1)) (:sections @state)))
@@ -114,7 +147,7 @@
                               (if (get-in solved [:sketch/solver :converged?]) "Fully constrained" "Constraint conflict"))
                         (commit! sections)
                         (sync-point-fields!)))
-  (.addEventListener (.getElementById js/document "reset") "click" #(do (commit! (sections)) (sync-point-fields!)))
+  (.addEventListener (.getElementById js/document "reset") "click" #(do (swap! state assoc :selected-section 0) (commit! (sections)) (sync-section-options!) (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))
   (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value)) :save-status :dirty) (upload!)))
   (.addEventListener (.getElementById js/document "snap") "change" #(swap! state assoc :snap (num "snap") :save-status :dirty))
@@ -131,8 +164,8 @@
   (.addEventListener js/window "keydown"
                      #(when (and (not (editable-target? %)) (= "/" (.-key %)))
                         (.preventDefault %) (.focus (.getElementById js/document "command"))))
-  (.addEventListener (.getElementById js/document "undo") "click" #(when-let [prev (peek (:history @state))] (swap! state (fn [s] (assoc s :sections prev :history (pop (:history s)) :future (conj (:future s) (:sections s))))) (upload!)))
-  (.addEventListener (.getElementById js/document "redo") "click" (fn [] (when-let [next (peek (:future @state))] (swap! state (fn [s] (assoc s :sections next :future (pop (:future s)) :history (conj (:history s) (:sections s))))) (upload!))))
+  (.addEventListener (.getElementById js/document "undo") "click" #(when-let [prev (peek (:history @state))] (swap! state (fn [s] (assoc s :sections prev :selected-section (min (:selected-section s) (dec (count prev))) :history (pop (:history s)) :future (conj (:future s) (:sections s))))) (sync-section-options!) (sync-point-fields!) (upload!)))
+  (.addEventListener (.getElementById js/document "redo") "click" (fn [] (when-let [next (peek (:future @state))] (swap! state (fn [s] (assoc s :sections next :selected-section (min (:selected-section s) (dec (count next))) :future (pop (:future s)) :history (conj (:history s) (:sections s))))) (sync-section-options!) (sync-point-fields!) (upload!))))
   (.addEventListener canvas "pointerdown" #(reset! drag [(.-clientX %) (.-clientY %)])) (.addEventListener js/window "pointerup" #(reset! drag nil))
   (.addEventListener js/window "pointermove" (fn [e] (when-let [[x y] @drag] (swap! state update :azimuth + (* 0.008 (- (.-clientX e) x))) (swap! state update :elevation #(max -1.2 (min 1.2 (+ % (* 0.008 (- (.-clientY e) y)))))) (reset! drag [(.-clientX e) (.-clientY e)]))))
   (.addEventListener (.getElementById js/document "save-project") "click" save-project!)
