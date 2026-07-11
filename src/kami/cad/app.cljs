@@ -1,7 +1,8 @@
 (ns kami.cad.app (:require [kami.cad :as cad] [kami.webgpu.mesh :as gpu]))
 (defn sections [] [(cad/curve [[-2 0 0] [0 2 0] [2 0 0]] [1 1 1]) (cad/curve [[-2 0 2] [0 3 2] [2 0 2]] [1 1 1])])
 (defonce state (atom {:sections (sections) :segments 16 :selected-section 0 :selected-point 1
-                      :history [] :future [] :azimuth 0.7 :elevation 0.45}))
+                      :history [] :future [] :azimuth 0.7 :elevation 0.45
+                      :profile :rhino :last-command nil :command-status "Ready"}))
 (defonce viewport (atom nil))
 (defn- mesh [] (cad/loft-mesh (cad/loft (:sections @state) (:segments @state))))
 (defn- upload! []
@@ -10,7 +11,8 @@
       (swap! viewport assoc :buffers (gpu/upload-mesh! (:mesh-context v) m))
       (set! (.-textContent (.getElementById js/document "stats")) (str "2 sections · " (count (:positions m)) " vertices · " (/ (count (:indices m)) 3) " triangles"))
       (set! (.-textContent (.getElementById js/document "debug-state"))
-            (js/JSON.stringify (clj->js {:segments (:segments @state)
+            (js/JSON.stringify (clj->js {:segments (:segments @state) :profile (name (:profile @state))
+                                         :lastCommand (:last-command @state) :commandStatus (:command-status @state)
                                          :sectionWidth (- (first (last (:cad/control-points (first (:sections @state)))))
                                                           (first (first (:cad/control-points (first (:sections @state))))))
                                          :controlPoints (mapv :cad/control-points (:sections @state))}))))))
@@ -24,6 +26,24 @@
     (doseq [[id value] (map vector ["cp-x" "cp-y" "cp-z"] point)]
       (set! (.-value (.getElementById js/document id)) value))
     (set! (.-value (.getElementById js/document "weight")) weight)))
+(def command-aliases
+  {:rhino {"trim" :trim "fit" :fit "zoom extents" :fit "reset" :reset "solvewidth" :solve-width "undo" :undo "redo" :redo}
+   :autocad {"tr" :trim "trim" :trim "z" :fit "ze" :fit "regen" :reset "dim" :solve-width "u" :undo "redo" :redo}
+   :fusion {"trim" :trim "fit" :fit "home" :fit "reset" :reset "dimension" :solve-width "undo" :undo "redo" :redo}
+   :plasticity {"t" :trim "trim" :trim "f" :fit "fit" :fit "reset" :reset "d" :solve-width "undo" :undo "redo" :redo}})
+(defn- run-command! [text]
+  (let [normalized (-> text .trim .toLowerCase) command (get-in command-aliases [(:profile @state) normalized])
+        button-id ({:trim "trim" :fit "fit" :reset "reset" :solve-width "solve-width" :undo "undo" :redo "redo"} command)]
+    (if button-id
+      (do (swap! state assoc :last-command normalized :command-status (str "Executed " normalized))
+          (.click (.getElementById js/document button-id)))
+      (swap! state assoc :command-status (str "Unknown command: " normalized)))
+    (set! (.-textContent (.getElementById js/document "command-status")) (:command-status @state))
+    (set! (.-value (.getElementById js/document "command")) "")
+    (upload!)))
+(defn- editable-target? [event]
+  (let [target (.-target event) tag (some-> target .-tagName .toLowerCase)]
+    (or (#{"input" "select" "textarea"} tag) (.-isContentEditable target))))
 (defn ^:export init! []
  (let [canvas (.getElementById js/document "gpu-canvas") drag (atom nil)]
   (-> (gpu/init-canvas! canvas) (.then (fn [v] (reset! viewport v) (upload!) (set! (.-textContent (.getElementById js/document "gpu-status")) "") (draw!))))
@@ -64,6 +84,18 @@
   (.addEventListener (.getElementById js/document "reset") "click" #(do (commit! (sections)) (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))
   (.addEventListener (.getElementById js/document "segments") "input" #(do (swap! state assoc :segments (js/parseInt (.. % -target -value))) (upload!)))
+  (.addEventListener (.getElementById js/document "profile") "change"
+                     #(do (swap! state assoc :profile (keyword (.. % -target -value)))
+                          (set! (.-textContent (.getElementById js/document "profile-hint"))
+                                (case (:profile @state) :autocad "TR Trim · Z/ZE Fit · DIM Solve"
+                                      :fusion "Trim · Fit · Dimension"
+                                      :plasticity "T Trim · F Fit · D Dimension"
+                                      "Trim · Zoom Extents · SolveWidth")) (upload!)))
+  (.addEventListener (.getElementById js/document "command") "keydown"
+                     #(when (= "Enter" (.-key %)) (.preventDefault %) (run-command! (.. % -target -value))))
+  (.addEventListener js/window "keydown"
+                     #(when (and (not (editable-target? %)) (= "/" (.-key %)))
+                        (.preventDefault %) (.focus (.getElementById js/document "command"))))
   (.addEventListener (.getElementById js/document "undo") "click" #(when-let [prev (peek (:history @state))] (swap! state (fn [s] (assoc s :sections prev :history (pop (:history s)) :future (conj (:future s) (:sections s))))) (upload!)))
   (.addEventListener (.getElementById js/document "redo") "click" (fn [] (when-let [next (peek (:future @state))] (swap! state (fn [s] (assoc s :sections next :future (pop (:future s)) :history (conj (:history s) (:sections s))))) (upload!))))
   (.addEventListener canvas "pointerdown" #(reset! drag [(.-clientX %) (.-clientY %)])) (.addEventListener js/window "pointerup" #(reset! drag nil))

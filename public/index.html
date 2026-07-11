@@ -22,32 +22,22 @@ button { cursor: pointer; }</style></head>
       <a href="https://kotoba-lang.github.io/kami-studio/">Studio</a>
       <span>WebGPU precision workspace</span>
       <span class="spacer"></span>
+      <select id="profile" aria-label="Interaction profile">
+        <option value="rhino">Rhino</option>
+        <option value="autocad">AutoCAD</option>
+        <option value="fusion">Fusion</option>
+        <option value="plasticity">Plasticity</option>
+      </select>
       <button id="undo">Undo</button>
       <button id="redo">Redo</button>
       <button id="export">Export EDN</button>
     </header>
     <main>
-      <aside>
-        <h2>Model</h2>
-        <button class="primary">Loft Surface</button>
-        <h2>Dimensional sketch</h2>
-        <label>Section width (m)<input id="sketch-width" type="number" min="0.1" step="0.1" value="4"></label>
-        <button id="solve-width">Solve width constraint</button>
-        <p id="solver-status">Fully constrained</p>
-        <h2>Tools</h2>
-        <button id="fit">Fit View</button>
-        <button id="reset">Reset Sections</button>
-        <h2>Trim exact spans</h2>
-        <label>Start<input id="trim-start" type="number" min="0" max="1" step="0.05" value="0.1"></label>
-        <label>End<input id="trim-end" type="number" min="0" max="1" step="0.05" value="0.9"></label>
-        <button id="trim">Trim sections</button>
-        <h2>Precision</h2>
-        <select id="snap">
-          <option value="0.1">Snap 0.1 mm</option>
-          <option value="0.5">Snap 0.5 mm</option>
-          <option value="1">Snap 1 mm</option>
-        </select>
-      </aside>
+      <aside><h2>Command Line</h2><input id="command" placeholder="Type command…  / to focus" aria-label="CAD command"><p id="command-status">Ready</p><p id="profile-hint">Trim · Zoom Extents · SolveWidth</p><h2>Model</h2><button class="primary">Loft Surface</button><h2>Dimensional sketch</h2><label>Section width (m)<input id="sketch-width" type="number" min="0.1" step="0.1" value="4"></label><button id="solve-width">Solve width constraint</button><p id="solver-status">Fully constrained</p><h2>Tools</h2><button id="fit">Fit View</button><button id="reset">Reset Sections</button><h2>Trim exact spans</h2><label>Start<input id="trim-start" type="number" min="0" max="1" step="0.05" value="0.1"></label><label>End<input id="trim-end" type="number" min="0" max="1" step="0.05" value="0.9"></label><button id="trim">Trim sections</button><h2>Precision</h2><select id="snap">
+        <option value="0.1">Snap 0.1 mm</option>
+        <option value="0.5">Snap 0.5 mm</option>
+        <option value="1">Snap 1 mm</option>
+      </select></aside>
       <section class="viewport">
         <canvas id="gpu-canvas" aria-label="NURBS WebGPU viewport"></canvas>
         <div id="gpu-status">Initializing WebGPU…</div>
