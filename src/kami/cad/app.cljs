@@ -108,6 +108,7 @@
   (when-let [file (aget (.. event -target -files) 0)] (-> (.text file) (.then #(apply-project! (reader/read-string %))))))
 (defn ^:export init! []
  (let [canvas (.getElementById js/document "gpu-canvas") drag (atom nil)]
+  (.setAttribute (.getElementById js/document "snap") "aria-label" "Precision snap increment")
   (-> (gpu/init-canvas! canvas) (.then (fn [v] (reset! viewport v) (upload!) (set! (.-textContent (.getElementById js/document "gpu-status")) "") (draw!))))
   (.addEventListener (.getElementById js/document "apply") "click"
                      #(let [inc (num "snap") p (cad/snap-point [(num "cp-x") (num "cp-y") (num "cp-z")] inc)

@@ -15,7 +15,7 @@ header .spacer { flex: 1; }
 #gpu-status { position: absolute; left: 50%; top: 45%; transform: translate(-50%,-50%); color: #ffb0b0; }
 aside { padding: 16px; background: #101a2e; border-right: 1px solid #32466e; }
 header { display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #17223b; }
-button { cursor: pointer; }</style></head>
+button { cursor: pointer; } :focus-visible { outline: 3px solid #ffd166; outline-offset: 2px; }</style></head>
   <body>
     <header>
       <strong>KAMI CAD · NURBS</strong>
@@ -33,7 +33,7 @@ button { cursor: pointer; }</style></head>
       <button id="save-project">Save</button>
       <button id="load-project">Load</button>
       <button id="import">Import</button>
-      <input id="import-file" type="file" accept=".edn,.kami-cad.edn" style="display:none;">
+      <input id="import-file" aria-label="Import CAD project file" type="file" accept=".edn,.kami-cad.edn" style="display:none;">
       <button id="export">Export Project</button>
     </header>
     <main>
