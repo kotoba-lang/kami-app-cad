@@ -1,5 +1,8 @@
 (ns kami.cad.project)
 (def current-version 2)
+(defn- normalize-snap-units [p]
+  (update-in p [:project/precision :snap]
+             #(if (#{0.1 0.5 1} %) (/ % 1000.0) %)))
 (defn document [{:keys [id name sections tessellation selection camera precision interaction]}]
   {:kami/document :cad-project :kami/version current-version :project/id (or id "untitled-cad")
    :project/name (or name "Untitled CAD") :project/sections sections :project/tessellation tessellation
@@ -7,13 +10,13 @@
 (defn migrate [v]
   (cond
     (= :cad-project (:kami/document v))
-    (case (:kami/version v) 2 v
-      1 (-> v (assoc :kami/version 2 :project/precision {:snap 0.1 :sketch-width 4.0}
+    (case (:kami/version v) 2 (normalize-snap-units v)
+      1 (-> v (assoc :kami/version 2 :project/precision {:snap 0.001 :sketch-width 4.0}
                      :project/interaction {:profile :rhino}) (dissoc :project/version))
       (throw (ex-info "Unsupported CAD project version" {:version (:kami/version v)})))
     (and (vector? v) (seq v) (:cad/control-points (first v)))
     (document {:sections v :tessellation 16 :selection {:section 0 :point 1}
-               :camera {:azimuth 0.7 :elevation 0.45} :precision {:snap 0.1 :sketch-width 4.0}
+               :camera {:azimuth 0.7 :elevation 0.45} :precision {:snap 0.001 :sketch-width 4.0}
                :interaction {:profile :rhino}})
     :else (throw (ex-info "Not a CAD project" {:value v}))))
 (defn valid? [p]
