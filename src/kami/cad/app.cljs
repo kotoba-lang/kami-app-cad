@@ -8,7 +8,7 @@
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
                       :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0 :sketch-height 2.0
                       :measurement-tolerance 0.000001 :feature-model (feature-model (sections) 16) :selected-feature :loft
-                      :solid nil :view-mode :loft :extrude-height 2.0
+                      :solid nil :solid-b nil :view-mode :loft :extrude-height 2.0
                       :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
 (defonce viewport (atom nil))
 (defn- mesh [] (if (and (= :solid (:view-mode @state)) (:solid @state))
@@ -211,6 +211,36 @@
                         (set! (.-textContent (.getElementById js/document "solid-result"))
                               (str "Volume " (.toFixed (cad/solid-volume solid) 3) " m³ · watertight"))
                         (upload!)))
+  (.addEventListener (.getElementById js/document "stash-solid-b") "click"
+                     #(do (swap! state assoc :solid-b (:solid @state))
+                          (set! (.-textContent (.getElementById js/document "solid-b-status"))
+                                (if (:solid-b @state)
+                                  (str "Solid B stashed · Volume " (.toFixed (cad/solid-volume (:solid-b @state)) 3) " m³")
+                                  "No solid B"))))
+  ;; Boolean ops are scoped to axis-aligned coaxial convex-polygon prisms
+  ;; (see kami.cad's boolean-union/-difference/-intersect docstrings and
+  ;; ADR-26071224xx); union/difference additionally require A and B to share
+  ;; an identical cross-section profile. Each op returns a vector of 0-2
+  ;; solids -- this UI shows only the first result (`(first results)`) since
+  ;; the viewport can only display a single solid at a time.
+  (.addEventListener (.getElementById js/document "apply-boolean") "click"
+                     #(let [op (keyword (.-value (.getElementById js/document "boolean-op")))
+                            a (:solid @state) b (:solid-b @state) result-el (.getElementById js/document "boolean-result")]
+                        (if (and a b)
+                          (try
+                            (let [results (case op
+                                            :intersect (cad/boolean-intersect a b)
+                                            :union (cad/boolean-union a b)
+                                            :difference (cad/boolean-difference a b))]
+                              (if (seq results)
+                                (do (swap! state assoc :solid (first results) :view-mode :solid :save-status :dirty)
+                                    (set! (.-textContent result-el)
+                                          (str (count results) " result solid(s) · showing 1st · Volume "
+                                               (.toFixed (cad/solid-volume (first results)) 3) " m³"))
+                                    (upload!))
+                                (set! (.-textContent result-el) "Empty result (no overlap)")))
+                            (catch :default e (set! (.-textContent result-el) (str "Unsupported: " (.-message e)))))
+                          (set! (.-textContent result-el) "Need both Solid A (extrude) and a stashed Solid B"))))
   (.addEventListener (.getElementById js/document "show-loft") "click" #(do (swap! state assoc :view-mode :loft) (upload!)))
   (.addEventListener (.getElementById js/document "show-solid") "click" #(when (:solid @state) (swap! state assoc :view-mode :solid) (upload!)))
   (.addEventListener (.getElementById js/document "fit") "click" #(swap! state assoc :azimuth 0.7 :elevation 0.45))

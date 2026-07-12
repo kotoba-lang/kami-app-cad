@@ -55,6 +55,14 @@ button { cursor: pointer; } :focus-visible { outline: 3px solid #ffd166; outline
         <label>Height (m)<input id="extrude-height" type="number" min="0.01" step="0.1" value="2"></label>
         <label>Corner radius (m)<input id="corner-radius" type="number" min="0" step="0.05" value="0"></label>
         <button class="primary" id="extrude-solid">Extrude Watertight Solid</button><p id="solid-result">No solid</p>
+        <h2>Boolean Solid Ops</h2>
+        <button id="stash-solid-b">Stash Current Solid as B</button><p id="solid-b-status">No solid B</p>
+        <label>Operation<select id="boolean-op">
+          <option value="intersect">Intersect (A ∩ B)</option>
+          <option value="union">Union (A ∪ B, same profile only)</option>
+          <option value="difference">Difference (A − B, same profile only)</option>
+        </select></label>
+        <button id="apply-boolean">Apply Boolean (A ∘ B)</button><p id="boolean-result">No boolean result</p>
         <h2>Measurements</h2>
         <label>Tolerance (m)<input id="measurement-tolerance" type="number" min="0.0000000001" step="0.000001" value="0.000001"></label>
         <p id="measurement-result">Measuring…</p>
