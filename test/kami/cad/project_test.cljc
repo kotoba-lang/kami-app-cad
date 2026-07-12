@@ -19,8 +19,15 @@
   (let [v3 (project/document {:sections sections :tessellation 16 :selection {} :camera {}
                               :precision {:snap 0.001} :interaction {}})
         migrated (project/open (-> v3 (assoc :kami/version 2) (dissoc :project/feature-model)))]
-    (is (= 4 (:kami/version migrated)))
+    (is (= 5 (:kami/version migrated)))
     (is (contains? migrated :project/feature-model))
     (is (nil? (:project/feature-model migrated)))
     (is (= :loft (:project/view-mode migrated)))
     (is (nil? (:project/solid migrated)))))
+
+(deftest migrates-version-four-dimensional-sketch
+  (let [v4 (-> (project/document {:sections sections :tessellation 16 :selection {} :camera {}
+                                   :precision {:snap 0.001 :sketch-width 6.5} :interaction {}})
+               (assoc :kami/version 4) (dissoc :project/sketch))
+        migrated (project/open v4)]
+    (is (= {:width 6.5 :height 2.0} (:project/sketch migrated)))))

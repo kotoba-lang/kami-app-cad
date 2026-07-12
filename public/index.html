@@ -35,6 +35,7 @@ button { cursor: pointer; } :focus-visible { outline: 3px solid #ffd166; outline
       <button id="import">Import</button>
       <input id="import-file" aria-label="Import CAD project file" type="file" accept=".edn,.kami-cad.edn" style="display:none;">
       <button id="export">Export Project</button>
+      <label>Crown height (m)<input id="sketch-height" type="number" min="0.1" step="0.1" value="2"></label>
     </header>
     <main>
       <aside><h2>Command Line</h2><input id="command" placeholder="Type command…  / to focus" aria-label="CAD command"><p id="command-status">Ready</p><p id="profile-hint">Trim · Zoom Extents · SolveWidth</p><h2>Feature History</h2><div id="feature-tree"></div><button id="toggle-feature">Suppress / Resume</button><button id="recompute-features">Recompute All</button><h2>Model</h2><button class="primary">Loft Surface</button><h2>Dimensional sketch</h2><label>Section width (m)<input id="sketch-width" type="number" min="0.1" step="0.1" value="4"></label><button id="solve-width">Solve width constraint</button><p id="solver-status">Fully constrained</p><h2>Tools</h2><button id="fit">Fit View</button><button id="reset">Reset Sections</button><h2>Trim exact spans</h2><label>Start<input id="trim-start" type="number" min="0" max="1" step="0.05" value="0.1"></label><label>End<input id="trim-end" type="number" min="0" max="1" step="0.05" value="0.9"></label><button id="trim">Trim sections</button><h2>Precision</h2><select id="snap">

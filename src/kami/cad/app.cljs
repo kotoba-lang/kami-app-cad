@@ -1,12 +1,12 @@
 (ns kami.cad.app (:require [cljs.reader :as reader] [clojure.string :as string]
-                           [kami.cad :as cad] [kami.cad.project :as project] [kami.webgpu.mesh :as gpu]))
+                           [kami.cad :as cad] [kami.cad.project :as project] [kami.cad.dimensional-sketch :as sketch] [kami.webgpu.mesh :as gpu]))
 (defn sections [] [(cad/curve [[-2 0 0] [0 2 0] [2 0 0]] [1 1 1]) (cad/curve [[-2 0 2] [0 3 2] [2 0 2]] [1 1 1])])
 (defn- feature-model [sections segments]
   (let [sources (mapv (fn [index section] (cad/feature (keyword (str "section-" index)) :source [] {:value section})) (range) sections)]
     (cad/feature-model (conj sources (cad/feature :loft :loft (mapv :feature/id sources) {:segments segments})))))
 (defonce state (atom {:sections (sections) :segments 16 :selected-section 0 :selected-point 1
                       :history [] :future [] :azimuth 0.7 :elevation 0.45
-                      :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0
+                      :profile :rhino :last-command nil :command-status "Ready" :snap 0.001 :sketch-width 4.0 :sketch-height 2.0
                       :measurement-tolerance 0.000001 :feature-model (feature-model (sections) 16) :selected-feature :loft
                       :solid nil :view-mode :loft :extrude-height 2.0
                       :project-id "untitled-cad" :project-name "Untitled CAD" :revision 0 :save-status :clean}))
@@ -107,11 +107,11 @@
 (def ^:private storage-key "kami.cad.project.v2")
 (def ^:private backup-key "kami.cad.project.backup")
 (defn- project-document []
-  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width measurement-tolerance profile feature-model solid view-mode]} @state]
+  (let [{:keys [project-id project-name sections segments selected-section selected-point azimuth elevation snap sketch-width sketch-height measurement-tolerance profile feature-model solid view-mode]} @state]
     (project/document {:id project-id :name project-name :sections sections :tessellation segments
                        :selection {:section selected-section :point selected-point} :camera {:azimuth azimuth :elevation elevation}
                        :precision {:snap snap :sketch-width sketch-width :measurement-tolerance measurement-tolerance} :interaction {:profile profile}
-                       :feature-model feature-model :solid solid :view-mode view-mode})))
+                       :feature-model feature-model :solid solid :view-mode view-mode :sketch {:width sketch-width :height sketch-height}})))
 (defn- save-project! []
   (let [data (pr-str (project-document)) old (.getItem js/localStorage storage-key)]
     (when old (.setItem js/localStorage backup-key old)) (.setItem js/localStorage storage-key data)
@@ -121,13 +121,15 @@
         precision (:project/precision p) interaction (:project/interaction p)]
     (swap! state assoc :project-id (:project/id p) :project-name (:project/name p) :sections (:project/sections p)
            :segments (:project/tessellation p) :selected-section (:section selection) :selected-point (:point selection)
-           :azimuth (:azimuth camera) :elevation (:elevation camera) :snap (:snap precision) :sketch-width (:sketch-width precision)
+           :azimuth (:azimuth camera) :elevation (:elevation camera) :snap (:snap precision)
+           :sketch-width (get-in p [:project/sketch :width]) :sketch-height (get-in p [:project/sketch :height])
            :measurement-tolerance (:measurement-tolerance precision 0.000001)
            :feature-model (or (:project/feature-model p) (feature-model (:project/sections p) (:project/tessellation p)))
            :solid (:project/solid p) :view-mode (:project/view-mode p :loft)
            :profile (:profile interaction) :history [] :future [] :save-status :saved)
     (doseq [[id value] [["segments" (:project/tessellation p)] ["section-index" (:section selection)] ["point-index" (:point selection)]
-                        ["snap" (:snap precision)] ["sketch-width" (:sketch-width precision)]
+                        ["snap" (:snap precision)] ["sketch-width" (get-in p [:project/sketch :width])]
+                        ["sketch-height" (get-in p [:project/sketch :height])]
                         ["measurement-tolerance" (:measurement-tolerance precision 0.000001)] ["profile" (name (:profile interaction))]]]
       (set! (.-value (.getElementById js/document id)) value))
     (sync-section-options!) (sync-point-fields!) (upload!)))
@@ -170,22 +172,13 @@
                         (commit! (mapv (fn [section] (cad/trim-curve section t0 t1)) (:sections @state)))
                         (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "solve-width") "click"
-                     #(let [width (max 0.1 (num "sketch-width")) half (/ width 2)
-                            sketch (cad/sketch [(cad/sketch-point :left (- half) 0 true)
-                                                (cad/sketch-point :right (+ half 0.35) 0.2)]
-                                               [(cad/sketch-line :baseline :left :right)]
-                                               [(cad/horizontal :horizontal :baseline)
-                                                (cad/distance-constraint :width :left :right width)])
-                            solved (cad/solve-sketch sketch)
-                            [left _] (get-in solved [:sketch/points :left :sketch.point/position])
-                            [right _] (get-in solved [:sketch/points :right :sketch.point/position])
-                            sections (mapv (fn [section]
-                                             (-> section
-                                                 (cad/move-control-point 0 (assoc (get-in section [:cad/control-points 0]) 0 left))
-                                                 (cad/move-control-point 2 (assoc (get-in section [:cad/control-points 2]) 0 right))))
-                                           (:sections @state))]
+                     #(let [dimensions {:width (max 0.1 (num "sketch-width")) :height (max 0.1 (num "sketch-height"))}
+                            {:keys [sections solver]} (sketch/solve-sections (:sections @state) dimensions)]
                         (set! (.-textContent (.getElementById js/document "solver-status"))
-                              (if (get-in solved [:sketch/solver :converged?]) "Fully constrained" "Constraint conflict"))
+                              (if (:converged? solver)
+                                (str "Fully constrained · 6 constraints · residual " (.toExponential (:max-residual solver) 2))
+                                (str "Constraint conflict · residual " (.toExponential (:max-residual solver) 2))))
+                        (swap! state assoc :sketch-width (:width dimensions) :sketch-height (:height dimensions))
                         (commit! sections)
                         (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "reset") "click" #(do (swap! state assoc :selected-section 0) (commit! (sections)) (sync-section-options!) (sync-point-fields!)))
@@ -209,6 +202,7 @@
   (.addEventListener (.getElementById js/document "recompute-features") "click" upload!)
   (.addEventListener (.getElementById js/document "snap") "change" #(swap! state assoc :snap (num "snap") :save-status :dirty))
   (.addEventListener (.getElementById js/document "sketch-width") "change" #(swap! state assoc :sketch-width (num "sketch-width") :save-status :dirty))
+  (.addEventListener (.getElementById js/document "sketch-height") "change" #(swap! state assoc :sketch-height (num "sketch-height") :save-status :dirty))
   (.addEventListener (.getElementById js/document "measurement-tolerance") "change"
                      #(do (swap! state assoc :measurement-tolerance (max 1.0e-10 (num "measurement-tolerance"))) (upload!)))
   (.addEventListener (.getElementById js/document "export-measurements") "click" download-measurements!)
