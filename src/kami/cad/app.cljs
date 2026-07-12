@@ -66,6 +66,27 @@
         (set! (.-value option) index) (set! (.-textContent option) (str "Section " (inc index)))
         (.appendChild select option)))
     (set! (.-value select) selected)))
+(defn- rounded-rect-solid
+  "Extrude a width x depth rectangle into a watertight solid, rounding all
+  four corners with `radius` (clamped to a safe fraction of the shorter side)
+  when positive."
+  [width depth height radius]
+  (let [w (/ width 2) d (/ depth 2)]
+    (if (<= radius 0)
+      (cad/extrude-polygon [[(- w) (- d) 0] [w (- d) 0] [w d 0] [(- w) d 0]] [0 0 height])
+      (let [base (cad/sketch [(cad/sketch-point :r0 (- w) (- d) true) (cad/sketch-point :r1 w (- d) true)
+                              (cad/sketch-point :r2 w d true) (cad/sketch-point :r3 (- w) d true)]
+                             [(cad/sketch-line :re0 :r0 :r1) (cad/sketch-line :re1 :r1 :r2)
+                              (cad/sketch-line :re2 :r2 :r3) (cad/sketch-line :re3 :r3 :r0)]
+                             [])
+            clamped (min radius (* 0.2 (min width depth)))
+            rounded (reduce (fn [s corner]
+                              (cad/fillet-sketch s corner clamped
+                                                 (keyword (str (name corner) "-fs"))
+                                                 (keyword (str (name corner) "-fe"))
+                                                 (keyword (str (name corner) "-farc"))))
+                            base [:r0 :r1 :r2 :r3])]
+        (cad/extrude-polygon (cad/sketch-loop->polygon rounded 8) [0 0 height])))))
 (defn- offset-section [section dz]
   (update section :cad/control-points #(mapv (fn [[x y z]] [x y (+ z dz)]) %)))
 (defn- duplicate-section! []
@@ -184,8 +205,8 @@
   (.addEventListener (.getElementById js/document "reset") "click" #(do (swap! state assoc :selected-section 0) (commit! (sections)) (sync-section-options!) (sync-point-fields!)))
   (.addEventListener (.getElementById js/document "extrude-solid") "click"
                      #(let [width (max 0.1 (num "sketch-width")) depth (max 0.1 (num "solid-depth")) height (max 0.01 (num "extrude-height"))
-                            w (/ width 2) d (/ depth 2)
-                            solid (cad/extrude-polygon [[(- w) (- d) 0] [w (- d) 0] [w d 0] [(- w) d 0]] [0 0 height])]
+                            radius (max 0 (num "corner-radius"))
+                            solid (rounded-rect-solid width depth height radius)]
                         (swap! state assoc :solid solid :view-mode :solid :extrude-height height :save-status :dirty)
                         (set! (.-textContent (.getElementById js/document "solid-result"))
                               (str "Volume " (.toFixed (cad/solid-volume solid) 3) " m³ · watertight"))
