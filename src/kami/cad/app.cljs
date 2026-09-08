@@ -1,4 +1,4 @@
-(ns kami.cad.app (:require [cljs.reader :as reader] [clojure.string :as string]
+(ns kami.cad.app (:require [cljs.reader :as reader] [kotoba.lang.text :as string]
                            [kami.cad :as cad] [kami.cad.project :as project] [kami.cad.dimensional-sketch :as sketch] [kami.webgpu.mesh :as gpu]))
 (defn sections [] [(cad/curve [[-2 0 0] [0 2 0] [2 0 0]] [1 1 1]) (cad/curve [[-2 0 2] [0 3 2] [2 0 2]] [1 1 1])])
 (defn- feature-model [sections segments]
