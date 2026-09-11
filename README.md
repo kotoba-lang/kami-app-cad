@@ -39,7 +39,7 @@ restriction. The viewport shows only the first result solid.
 
 ```sh
 npm install
-npx shadow-cljs watch app
+amu compile --target wasm32-browser app
 ```
 
 Then open `public/index.html`. The viewport requires WebGPU; without it the app
@@ -48,8 +48,8 @@ shows a status message rather than falling back.
 ## Verify
 
 ```sh
-clojure -M:test                 # project format + dimensional sketch
-npx shadow-cljs release app     # build public/js/app.js
+kbb -M:test                 # project format + dimensional sketch
+amu compile --target wasm32-browser app     # build public/js/app.js
 ```
 
 ## Known gap: `public/index.html` is no longer reproducible from source
