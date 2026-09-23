@@ -1,4 +1,4 @@
-(ns kami.cad.dimensional-sketch-test (:require [clojure.test :refer [deftest is]] [kami.cad :as cad]
+(ns kami.cad.dimensional-sketch-test (:require [kotoba.test :refer [deftest is]] [kami.cad :as cad]
                                                [kami.cad.dimensional-sketch :as sketch]))
 
 (deftest dimensions-drive-every-loft-section
